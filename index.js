@@ -4,6 +4,8 @@ require('dotenv').config();
 const app = express();
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const admin = require("firebase-admin");
+const stripe = require('stripe')(process.env.STRIPE);
+
 
 const port = process.env.PORT || 3000;
 
@@ -22,6 +24,25 @@ const client = new MongoClient(uri, {
   }
 });
 
+const verifyToken = async (req, res, next) => {
+  const wholeToken = req.headers.authorization;
+
+  if (!wholeToken) {
+    return res.status(401).send({ message: "unauthorized. Token not found" });
+  }
+
+  const token = wholeToken.split(" ")[1];
+
+  try {
+    const decodedUser = await admin.auth().verifyIdToken(token);
+    req.user = decodedUser;
+    next();
+  } catch (error) {
+    console.error("Token verification failed:", error);
+    res.status(401).send({ message: "unauthorized" });
+  }
+};
+
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
@@ -31,7 +52,7 @@ async function run() {
     const contestCollection = db.collection('Contests');
     const winnersCollection = db.collection('Winners');
 
-     app.get('/contests', async (req, res) => {
+    app.get('/contests', async (req, res) => {
 
       const result = await contestCollection.find().toArray();
 
@@ -43,6 +64,20 @@ async function run() {
       const result = await contestCollection.find().sort({ participations: -1 }).limit(5).toArray();
 
       res.send(result)
+    })
+
+    app.get(`/contest/:id`, async (req, res) => {
+      const { id } = req.params;
+
+      const result = await contestCollection.findOne({ _id: new ObjectId(id) });
+
+      res.send(result);
+    })
+
+    app.post('/addcontest', async (req, res) => {
+      const contest = req.body;
+      const result = await contestCollection.insertOne(contest);
+      res.send(result);
     })
 
     app.get('/winners', async (req, res) => {
@@ -64,6 +99,42 @@ async function run() {
       res.status(201).send(result);
 
     })
+
+   app.post('/create-checkout-session', async (req, res) => {
+  const paymentInfo = req.body;
+
+  try {
+    const amount = Math.round(Number(paymentInfo.prize.toString().replace(/\$/g, "")) * 100);
+
+
+    const session = await stripe.checkout.sessions.create({
+      line_items: [
+        {
+          price_data: {
+            currency: "USD",
+            product_data: { name: paymentInfo.name },
+            unit_amount: amount,
+          },
+          quantity: 1,
+        },
+      ],
+
+      customer_email: paymentInfo.email,
+      mode: 'payment',
+
+      // MATCH frontend property name
+      success_url: `${process.env.SITE_DOMAIN}/contest/${paymentInfo.contestId}?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${process.env.SITE_DOMAIN}/contest/${paymentInfo.contestId}`,
+    });
+
+    res.send({ url: session.url });
+
+  } catch (err) {
+    console.error("Stripe error:", err);
+    res.status(400).send({ error: err.message });
+  }
+});
+
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
