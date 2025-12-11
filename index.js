@@ -12,6 +12,11 @@ const port = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json())
 
+const serviceAccount = require("./contest-hub-firebase-adminsdk.json");
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@bababoey.nqekx8b.mongodb.net/?appName=Bababoey`;
 
@@ -50,7 +55,7 @@ async function run() {
 
     const db = client.db('Contest-hub');
     const contestCollection = db.collection('Contests');
-    const winnersCollection = db.collection('Winners');
+    const registeredCollection = db.collection("Registered");
 
     app.get('/contests', async (req, res) => {
 
@@ -80,60 +85,135 @@ async function run() {
       res.send(result);
     })
 
-    app.get('/winners', async (req, res) => {
-      const result = await winnersCollection.find().sort({ date: -1 }).toArray();
-      res.send(result);
-    })
+    app.get("/search", async (req, res) => {
+      const type = req.query.type;
 
-    app.post('/winners', async (req, res) => {
-      const { name, prize, img } = req.body;
-
-      const newWinner = {
-        name,
-        prize,
-        img: img || null,
-        date: new Date(),
+      if (!type) {
+        return res.send([]);
       }
 
-      const result = await winnerCollection.insertOne(newWinner);
-      res.status(201).send(result);
+      const result = await contestCollection
+        .find({ type: { $regex: type, $options: "i" } })
+        .toArray();
 
-    })
-
-   app.post('/create-checkout-session', async (req, res) => {
-  const paymentInfo = req.body;
-
-  try {
-    const amount = Math.round(Number(paymentInfo.prize.toString().replace(/\$/g, "")) * 100);
-
-
-    const session = await stripe.checkout.sessions.create({
-      line_items: [
-        {
-          price_data: {
-            currency: "USD",
-            product_data: { name: paymentInfo.name },
-            unit_amount: amount,
-          },
-          quantity: 1,
-        },
-      ],
-
-      customer_email: paymentInfo.email,
-      mode: 'payment',
-
-      // MATCH frontend property name
-      success_url: `${process.env.SITE_DOMAIN}/contest/${paymentInfo.contestId}?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${process.env.SITE_DOMAIN}/contest/${paymentInfo.contestId}`,
+      res.send(result);
     });
 
-    res.send({ url: session.url });
+    app.post('/create-checkout-session', async (req, res) => {
+      const paymentInfo = req.body;
 
-  } catch (err) {
-    console.error("Stripe error:", err);
-    res.status(400).send({ error: err.message });
-  }
-});
+      try {
+        const amount = parseInt(paymentInfo.fee * 100);
+
+        const session = await stripe.checkout.sessions.create({
+          line_items: [
+            {
+              price_data: {
+                currency: "USD",
+                product_data: { name: paymentInfo.name },
+                unit_amount: amount,
+              },
+              quantity: 1,
+            },
+          ],
+          customer_email: paymentInfo.email,
+          mode: 'payment',
+          metadata: {
+            contestId: paymentInfo.contestId,
+            userEmail: paymentInfo.email,
+            contestName: paymentInfo.name
+          },
+          success_url: `${process.env.SITE_DOMAIN}/dashboard/success?session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${process.env.SITE_DOMAIN}/contest/${paymentInfo.contestId}`,
+        });
+
+        res.send({ url: session.url });
+
+      } catch (err) {
+        console.error("Stripe error:", err);
+        res.status(400).send({ error: err.message });
+      }
+    });
+
+    app.patch('/verify-payment', async (req, res) => {
+      const sessionId = req.query.session_id;
+
+      try {
+        const session = await stripe.checkout.sessions.retrieve(sessionId);
+        const { contestId, userEmail, contestName } = session.metadata;
+
+        const transactionId = session.payment_intent;
+        const query = {
+          transactionId: transactionId,
+          userEmail: userEmail
+        };
+
+        const paymentExist = await registeredCollection.findOne(query);
+
+        if (paymentExist) {
+          return res.send({ message: "Already registered", transactionId });
+        }
+
+        if (session.payment_status === 'paid') {
+          const query = { _id: new ObjectId(contestId) };
+          const update = {
+            $inc: { participants: 1 },
+            $addToSet: { registeredUsers: userEmail }
+          };
+
+          const result = await contestCollection.updateOne(query, update);
+          await registeredCollection.insertOne({
+            contestId,
+            userEmail,
+            contestName,
+            registeredAt: new Date(),
+            paymentSession: session.id,
+            transactionId: session.payment_intent,
+            contestStatus: 'registered'
+          });
+
+          return res.send({ success: true, result });
+        }
+
+        res.send({ success: false });
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ success: false, error: err.message });
+      }
+    });
+
+    app.get('/registered', verifyToken, async (req, res) => {
+      try {
+        const email = req.query.email;
+
+        if (!email) {
+          return res.status(400).send({ message: "Email is required" });
+        }
+
+        // Check user identity using decoded token
+        if (email !== req.user.email) {
+          return res.status(403).send({ message: "Forbidden: Email mismatch" });
+        }
+
+        // Fetch contests for this user
+        const result = await registeredCollection.find({ userEmail: email }).toArray();
+
+        res.send(result);
+
+      } catch (err) {
+        console.error("Failed to fetch registered contests:", err);
+        res.status(500).send({ message: "Server error" });
+      }
+    });
+
+    app.get('/registered/single', verifyToken, async (req, res) => {
+      const { contestId, email } = req.query;
+
+      const record = await registeredCollection.findOne({ contestId, userEmail: email });
+
+      res.send(record || null);
+    });
+
 
 
     // Send a ping to confirm a successful connection
