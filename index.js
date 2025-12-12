@@ -56,6 +56,24 @@ async function run() {
     const db = client.db('Contest-hub');
     const contestCollection = db.collection('Contests');
     const registeredCollection = db.collection("Registered");
+    const userCollection = db.collection("Users");
+
+    app.post('/users', async (req, res) => {
+      const user = req.body;
+
+      user.role = "user";
+      user.createdAt = new Date();
+
+      const existing = await userCollection.findOne({ email: user.email });
+
+      if (existing) {
+        return res.send({ status: "exists" });
+      }
+
+      const result = await userCollection.insertOne(user);
+      res.send(result);
+    });
+
 
     app.get('/contests', async (req, res) => {
 
@@ -214,6 +232,53 @@ async function run() {
       res.send(record || null);
     });
 
+    app.patch("/registered/submit/:id", async (req, res) => {
+      const id = req.params.id;
+      const { submissionText, submittedAt } = req.body;
+
+      try {
+        const registered = await registeredCollection.findOne({
+          _id: new ObjectId(id),
+        });
+
+        const { contestId, userEmail } = registered;
+
+        const regUpdate = await registeredCollection.updateOne(
+          { _id: new ObjectId(id) },
+          {
+            $set: {
+              submission: {
+                text: submissionText,
+                submittedAt,
+              },
+              contestStatus: "submitted",
+            },
+          }
+        );
+
+        const contestUpdate = await contestCollection.updateOne(
+          { _id: new ObjectId(contestId) },
+          {
+            $push: {
+              submissions: {
+                userEmail,
+                text: submissionText,
+                submittedAt,
+              },
+            },
+          }
+        );
+
+        res.send({
+          success: true,
+          registeredUpdate: regUpdate,
+          contestUpdate: contestUpdate,
+        });
+
+      } catch (err) {
+        res.status(500).send({ success: false, error: err.message });
+      }
+    });
 
 
     // Send a ping to confirm a successful connection
