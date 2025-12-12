@@ -57,6 +57,8 @@ async function run() {
     const contestCollection = db.collection('Contests');
     const registeredCollection = db.collection("Registered");
     const userCollection = db.collection("Users");
+    const winnersCollection = db.collection("Winners");
+    const creatorsCollection = db.collection("Creators");
 
     app.post('/users', async (req, res) => {
       const user = req.body;
@@ -74,6 +76,64 @@ async function run() {
       res.send(result);
     });
 
+    app.patch('/users/:email', async (req, res) => {
+      const email = req.params.email;
+      const { name, photo, address, bio } = req.body;
+
+      try {
+        const result = await userCollection.updateOne(
+          { email },
+          {
+            $set: {
+              name,
+              photo,
+              address,
+              bio,
+              updatedAt: new Date(),
+            },
+          }
+        );
+
+        res.send({ success: true, result });
+      } catch (err) {
+        res.status(500).send({ success: false, error: err.message });
+      }
+    });
+
+    app.get("/winners", async (req, res) => {
+      const { email } = req.query;
+      const result = await winnersCollection.find({ email }).toArray();
+      res.send(result);
+    });
+
+    app.get('/creators', async (req, res) => {
+      const query = {}
+      if (req.query.status) {
+        query.status = req.query.status
+      }
+      const cursor = creatorsCollection.find(query)
+      const result = cursor.toArray();
+      res.send(result);
+    })
+
+    app.post('/creators', async (req, res) => {
+      try {
+        const creator = req.body;
+        creator.status = 'pending';
+        creator.createdAt = new Date();
+
+        const existing = await creatorsCollection.findOne({ email: creator.email });
+        if (existing) {
+          return res.send({ status: 'exists', message: 'You have already applied.' });
+        }
+
+        const result = await creatorsCollection.insertOne(creator);
+        res.send(result);
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ success: false, error: err.message });
+      }
+    });
 
     app.get('/contests', async (req, res) => {
 
