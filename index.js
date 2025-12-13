@@ -480,6 +480,61 @@ async function run() {
       }
     });
 
+    app.get('/creator/contests', verifyToken, async (req, res) => {
+      try {
+        const creatorId = req.user.uid; // UID from Firebase token
+        const contests = await contestCollection
+          .find({ creatorId }) // filter by creator
+          .toArray();
+
+        res.send(contests);
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ success: false, error: err.message });
+      }
+    });
+
+    app.patch('/creator/contest/:id', verifyToken, async (req, res) => {
+      const id = req.params.id;
+      const updates = req.body;
+
+      try {
+        const result = await contestCollection.updateOne(
+          { _id: new ObjectId(id), creatorId: req.user.uid, contestStatus: 'pending' },
+          { $set: { ...updates, updatedAt: new Date() } }
+        );
+
+        if (result.matchedCount === 0) {
+          return res.status(403).send({ message: "Not allowed or contest already approved" });
+        }
+
+        res.send({ success: true, result });
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ success: false, error: err.message });
+      }
+    });
+
+    app.delete('/creator/contest/:id', verifyToken, async (req, res) => {
+      const id = req.params.id;
+
+      try {
+        const result = await contestCollection.deleteOne({
+          _id: new ObjectId(id),
+          creatorId: req.user.uid,
+          contestStatus: 'pending'
+        });
+
+        if (result.deletedCount === 0) {
+          return res.status(403).send({ message: "Not allowed or contest already approved" });
+        }
+
+        res.send({ success: true, message: "Contest deleted" });
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ success: false, error: err.message });
+      }
+    });
 
 
     // Send a ping to confirm a successful connection
