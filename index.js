@@ -536,6 +536,79 @@ async function run() {
       }
     });
 
+    app.get('/creator/contests/approved', verifyToken, async (req, res) => {
+      try {
+        const creatorId = req.user.uid;
+        const contests = await contestCollection
+          .find({ creatorId, contestStatus: 'approved' })
+          .toArray();
+        res.send(contests);
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ message: 'Server error' });
+      }
+    });
+
+    // Pick a winner for an approved contest
+    app.patch('/creator/contests/:id/winner', verifyToken, async (req, res) => {
+      const contestId = req.params.id;
+      const { winnerEmail } = req.body;
+
+      if (!winnerEmail) {
+        return res.status(400).send({ message: 'Winner email is required' });
+      }
+
+      try {
+        // Find the contest and verify it's the creator's contest
+        const contest = await contestCollection.findOne({
+          _id: new ObjectId(contestId),
+          creatorId: req.user.uid,
+          contestStatus: 'approved'
+        });
+
+        if (!contest) {
+          return res.status(403).send({ message: 'Not allowed or contest not approved' });
+        }
+
+        // Verify that the winner email exists in submissions
+        const submissionExists = contest.submissions.some(
+          (sub) => sub.userEmail === winnerEmail
+        );
+
+        if (!submissionExists) {
+          return res.status(400).send({ message: 'This user did not submit for the contest' });
+        }
+
+        // Update contest with winner
+        await contestCollection.updateOne(
+          { _id: new ObjectId(contestId) },
+          {
+            $set: {
+              winner: winnerEmail,
+              contestStatus: 'completed',
+              updatedAt: new Date()
+            }
+          }
+        );
+
+        // Insert into winnersCollection for homepage showcase
+        await winnersCollection.insertOne({
+          contestId,
+          contestName: contest.name,
+          winnerEmail,
+          prize: contest.prize,
+          createdAt: new Date(),
+          contestType: contest.type,
+          banner: contest.banner
+        });
+
+        res.send({ success: true, message: 'Winner selected successfully' });
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ success: false, error: err.message });
+      }
+    });
+
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
