@@ -6,7 +6,6 @@ const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const admin = require("firebase-admin");
 const stripe = require('stripe')(process.env.STRIPE);
 
-
 const port = process.env.PORT || 3000;
 
 app.use(cors());
@@ -47,8 +46,6 @@ const verifyToken = async (req, res, next) => {
     res.status(401).send({ message: "unauthorized" });
   }
 };
-
-
 
 async function run() {
   try {
@@ -148,10 +145,12 @@ async function run() {
     })
 
     app.get("/winners", async (req, res) => {
-      const { email } = req.query;
-      const result = await winnersCollection.find({ email }).toArray();
-      res.send(result);
-    });
+  const { winnerEmail } = req.query;
+  if (!winnerEmail) return res.send([]);
+  const result = await winnersCollection.find({ winnerEmail }).toArray();
+  res.send(result);
+});
+
 
     app.get('/creators', verifyToken, verifyAdmin, async (req, res) => {
       const query = {}
@@ -380,12 +379,10 @@ async function run() {
           return res.status(400).send({ message: "Email is required" });
         }
 
-        // Check user identity using decoded token
         if (email !== req.user.email) {
           return res.status(403).send({ message: "Forbidden: Email mismatch" });
         }
 
-        // Fetch contests for this user
         const result = await registeredCollection.find({ userEmail: email }).toArray();
 
         res.send(result);
@@ -482,9 +479,9 @@ async function run() {
 
     app.get('/creator/contests', verifyToken, async (req, res) => {
       try {
-        const creatorId = req.user.uid; // UID from Firebase token
+        const creatorId = req.user.uid; 
         const contests = await contestCollection
-          .find({ creatorId }) // filter by creator
+          .find({ creatorId }) 
           .toArray();
 
         res.send(contests);
@@ -549,7 +546,6 @@ async function run() {
       }
     });
 
-    // Pick a winner for an approved contest
     app.patch('/creator/contests/:id/winner', verifyToken, async (req, res) => {
       const contestId = req.params.id;
       const { winnerEmail } = req.body;
@@ -608,7 +604,6 @@ async function run() {
         res.status(500).send({ success: false, error: err.message });
       }
     });
-
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
