@@ -145,12 +145,21 @@ async function run() {
     })
 
     app.get("/winners", async (req, res) => {
-  const { winnerEmail } = req.query;
-  if (!winnerEmail) return res.send([]);
-  const result = await winnersCollection.find({ winnerEmail }).toArray();
-  res.send(result);
-});
+      const { winnerEmail } = req.query;
+      if (!winnerEmail) return res.send([]);
+      const result = await winnersCollection.find({ winnerEmail }).toArray();
+      res.send(result);
+    });
 
+    app.get("/winners/all", async (req, res) => {
+      try {
+        const result = await winnersCollection.find().toArray();
+        res.send(result);
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ success: false, error: err.message });
+      }
+    });
 
     app.get('/creators', verifyToken, verifyAdmin, async (req, res) => {
       const query = {}
@@ -479,9 +488,9 @@ async function run() {
 
     app.get('/creator/contests', verifyToken, async (req, res) => {
       try {
-        const creatorId = req.user.uid; 
+        const creatorId = req.user.uid;
         const contests = await contestCollection
-          .find({ creatorId }) 
+          .find({ creatorId })
           .toArray();
 
         res.send(contests);
