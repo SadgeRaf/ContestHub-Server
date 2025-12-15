@@ -144,6 +144,31 @@ async function run() {
       res.send({ role: user?.role || 'user' })
     })
 
+    app.patch("/user/:email", verifyToken, async (req, res) => {
+      try {
+        if (req.user.email !== req.params.email) {
+          return res.status(403).send({ success: false, message: "Forbidden" });
+        }
+
+        const { name, photoURL, bio } = req.body;
+
+        const result = await userCollection.updateOne(
+          { email: req.params.email },
+          {
+            $set: {
+              name,
+              photoURL,
+              bio,
+            },
+          }
+        );
+
+        res.send({ success: true, result });
+      } catch (err) {
+        res.status(500).send({ success: false, error: err.message });
+      }
+    });
+
     app.get("/winners", async (req, res) => {
       const { winnerEmail } = req.query;
       if (!winnerEmail) return res.send([]);
